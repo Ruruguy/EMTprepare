@@ -1936,10 +1936,8 @@
       __publicField(this, "isMultiplayerMode", false);
       // 單人模式下所有偵測到的手全歸屬 P1
       // 雙手平滑濾波紀錄
-      __publicField(this, "smoothCoords", {
-        0: { x: 0.5, y: 0.5 },
-        1: { x: 0.5, y: 0.5 }
-      });
+      __publicField(this, "smoothCoords", {});
+      __publicField(this, "lastSeen", /* @__PURE__ */ new Map());
       __publicField(this, "pinchStates", {
         0: false,
         1: false
@@ -1963,6 +1961,7 @@
       this.onStateChangeCallback = cb;
     }
     setMultiplayerMode(isMulti) {
+      if (this.isMultiplayerMode !== isMulti) this.resetTracking();
       this.isMultiplayerMode = isMulti;
     }
     async start() {
@@ -2016,6 +2015,7 @@
     }
     stop() {
       this.isRunning = false;
+      this.resetTracking();
       if (this.camera) {
         try {
           this.camera.stop();
@@ -2023,7 +2023,18 @@
         }
       }
     }
+    resetTracking() {
+      this.lastSeen.clear();
+      this.smoothCoords = {};
+      this.pinchStates = {};
+      this.currentMultiState = { handsCount: 0, hands: [] };
+      this.ctx?.clearRect(0, 0, this.canvasEl.width, this.canvasEl.height);
+      this.onStateChangeCallback?.(this.currentMultiState);
+    }
     onResults(results) {
+      if (!this.isRunning) return;
+      const now = performance.now();
+      const aspect = this.videoEl.videoWidth / this.videoEl.videoHeight || 16 / 9;
       if (!this.ctx) return;
       const w = this.canvasEl.width;
       const h = this.canvasEl.height;
@@ -2033,18 +2044,16 @@
         const detectedRaw = results.multiHandLandmarks.slice(0, 2).map((landmarks, originalIdx) => {
           const thumb = landmarks[4];
           const index = landmarks[8];
-          const indexDIP = landmarks[7];
-          const middle = landmarks[12];
           const wrist = landmarks[0];
           const middleKnuckle = landmarks[9];
           const mirroredThumbX = 1 - thumb.x;
           const mirroredIndexX = 1 - index.x;
           const rawX = (mirroredThumbX + mirroredIndexX) / 2;
           const rawY = (thumb.y + index.y) / 2;
-          const palmDist = Math.hypot(wrist.x - middleKnuckle.x, wrist.y - middleKnuckle.y) || 0.15;
-          const pinchDist = Math.hypot(thumb.x - index.x, thumb.y - index.y);
-          const pinchThreshold = Math.max(0.075, Math.min(0.092, palmDist * 0.5));
-          const releaseThreshold = pinchThreshold + 0.036;
+          const palmDist = Math.max(1e-3, Math.hypot((wrist.x - middleKnuckle.x) * aspect, wrist.y - middleKnuckle.y));
+          const pinchDist = Math.hypot((thumb.x - index.x) * aspect, thumb.y - index.y);
+          const pinchThreshold = palmDist * 0.42;
+          const releaseThreshold = palmDist * 0.65;
           return {
             landmarks,
             rawX,
@@ -2055,17 +2064,24 @@
             originalIdx
           };
         });
-        if (this.isMultiplayerMode && detectedRaw.length > 1) {
-          detectedRaw.sort((a, b) => a.rawX - b.rawX);
-        }
+        const cost = (index, id) => {
+          const hand = detectedRaw[index];
+          if (!hand) return 0;
+          const previous = this.smoothCoords[id];
+          if (previous) return Math.hypot(hand.rawX - previous.x, hand.rawY - previous.y);
+          const side = this.isMultiplayerMode ? Math.abs(hand.rawX - id) : id;
+          return 0.45 + 0.1 * side;
+        };
+        const swap = cost(0, 1) + cost(1, 0) < cost(0, 0) + cost(1, 1);
         detectedRaw.forEach((hData, handIdx) => {
-          const isP1 = !this.isMultiplayerMode || handIdx === 0;
-          const handId = handIdx;
+          const handId = swap ? 1 - handIdx : handIdx;
+          this.lastSeen.set(handId, now);
+          const isP1 = !this.isMultiplayerMode || handId === 0;
           const color = isP1 ? "#3182CE" : "#E07A5F";
           const accentColor = isP1 ? "#63B3ED" : "#F6AD55";
           let label = isP1 ? "P1 \u6551\u8B77\u54E1" : "P2 \u6551\u8B77\u54E1";
           if (!this.isMultiplayerMode && detectedRaw.length > 1) {
-            label = handIdx === 0 ? "P1 \u6551\u8B77\u54E1" : "P1 (\u526F\u624B)";
+            label = handId === 0 ? "P1 \u6551\u8B77\u54E1" : "P1 (\u526F\u624B)";
           }
           const wasPinching = this.pinchStates[handId] || false;
           if (!wasPinching) {
@@ -2102,7 +2118,19 @@
           this.drawSingleHandSkeleton(hData.landmarks, handId, isPinching, color, accentColor, label, w, h);
         });
       }
+      const temporarilyMissing = [];
+      for (const [id, timestamp] of this.lastSeen) {
+        if (activeHands.some((hand) => hand.id === id)) continue;
+        if (now - timestamp < 180) {
+          temporarilyMissing.push(id);
+        } else {
+          this.lastSeen.delete(id);
+          delete this.smoothCoords[id];
+          delete this.pinchStates[id];
+        }
+      }
       this.currentMultiState = {
+        temporarilyMissing,
         handsCount: activeHands.length,
         hands: activeHands
       };
@@ -2794,16 +2822,16 @@
       const hands = multiState.hands;
       const allCards = this.shelfEl.querySelectorAll(".table-item-card");
       allCards.forEach((c) => c.classList.remove("is-hovered"));
-      hands.forEach((h, idx) => {
+      hands.forEach((h) => {
         if (!h.isPinching) {
-          const requestingPlayer = !this.isMultiplayerMode || idx === 0 ? "P1" : "P2";
+          const requestingPlayer = !this.isMultiplayerMode || h.id === 0 ? "P1" : "P2";
           const closest = this.findClosestShelfCard(h.cursorScreenX, h.cursorScreenY, 110, this.gameMode === "vs" ? requestingPlayer : void 0);
           if (closest) closest.classList.add("is-hovered");
         }
       });
       [0, 1].forEach((idx) => {
         const cursorObj = this.cursors[idx];
-        const hand = hands[idx];
+        const hand = hands.find((h) => h.id === idx);
         if (hand) {
           cursorObj.container.style.opacity = "1";
           cursorObj.container.style.left = `${hand.cursorScreenX}px`;
@@ -2811,6 +2839,9 @@
           const isP1Hand = !this.isMultiplayerMode || idx === 0;
           const themeBorder = isP1Hand ? "border-[#3182CE]" : "border-[#E07A5F]";
           const themeBg = isP1Hand ? "bg-[#3182CE]/20" : "bg-[#E07A5F]/20";
+          const label = document.getElementById(`cursor-label-${idx}`);
+          const caption = `${isP1Hand ? "1P" : "2P"} \xB7 ${hand.isPinching ? "\u634F\u5408" : "\u5F35\u958B"}`;
+          if (label && label.textContent !== caption) label.textContent = caption;
           if (hand.isPinching) {
             cursorObj.ring.className = "w-10 h-10 rounded-full border-2 border-orange-400 bg-orange-400/40 flex items-center justify-center scale-90 transition-all shadow-lg";
           } else {
@@ -2828,6 +2859,7 @@
           }
           this.prevPinchStates[idx] = hand.isPinching;
         } else {
+          if (multiState.temporarilyMissing?.includes(idx)) return;
           cursorObj.container.style.opacity = "0";
           if (this.activeGrabs.has(idx)) {
             this.cancelGrab(idx);
@@ -2900,6 +2932,7 @@
     }
     // 投放判定
     checkPinchDrop(handId, x, y) {
+      if (!this.isRoundActive || this.isPaused) return this.cancelGrab(handId);
       if (this.activeGrabs.has(handId)) {
         this.evaluateDrop(handId, x, y);
       }
