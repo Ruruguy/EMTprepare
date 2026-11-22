@@ -1,0 +1,15 @@
+{
+  "name": "ems-rescue-chicken-horse",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build --base=./ && npx esbuild src/main.ts --bundle --format=iife --target=es2020 --outfile=dist/app.bundle.js && sed -i '' 's/ crossorigin src=/ src=/g; s/ crossorigin href=/ href=/g' dist/index.html",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5",
+    "vite": "^5.2.11"
+  }
+}

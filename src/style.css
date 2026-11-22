@@ -1,0 +1,238 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ================= いらすとや (Irasutoya) 日式溫潤和紙繪本風格全局樣式 ================= */
+
+/* 桌面上器材貼紙卡片 (溫潤奶油和紙半透貼紙 + 巧克力棕手繪感邊框) */
+.table-item-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  background: rgba(255, 253, 249, 0.78);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-radius: 1.35rem;
+  border: 2.2px solid #463529;
+  box-shadow: 0 4px 0 rgba(70, 53, 41, 0.45), 0 8px 16px rgba(0, 0, 0, 0.28);
+  transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), 
+              background-color 0.2s ease, 
+              border-color 0.2s ease, 
+              box-shadow 0.2s ease, 
+              opacity 0.2s ease;
+}
+
+.table-item-card:hover,
+.table-item-card.is-hovered {
+  transform: translateY(-7px) scale(1.1);
+  background: rgba(255, 253, 249, 0.96);
+  border-color: #463529;
+  box-shadow: 0 0 0 3.5px #F6C46A, 0 8px 0 #463529, 0 14px 26px rgba(0, 0, 0, 0.4);
+  z-index: 35;
+}
+
+.table-item-card.is-dragged {
+  opacity: 0.28;
+  transform: scale(0.86);
+}
+
+/* 競賽模式：器材貼紙上下疊兩份 (Stacked Dual Washi Cards) */
+.table-item-card.is-stacked::before {
+  content: '';
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  right: -5px;
+  bottom: -5px;
+  background: rgba(246, 239, 226, 0.85);
+  border: 2px solid #463529;
+  border-radius: 1.35rem;
+  z-index: -1;
+  transform: rotate(3.5deg);
+  box-shadow: 0 3px 0 rgba(70, 53, 41, 0.35);
+  pointer-events: none;
+  transition: all 0.2s ease;
+}
+
+.table-item-card.is-stacked:hover::before,
+.table-item-card.is-stacked.is-hovered::before {
+  transform: rotate(5.5deg) scale(1.03);
+  background: #FDF0C9;
+}
+
+/* 庫存份數角標 (日式印章貼紙風格) */
+.card-stack-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  padding: 1px 7px;
+  font-size: 10.5px;
+  font-weight: 900;
+  border-radius: 9999px;
+  box-shadow: 0 2px 0 #463529;
+  border: 2px solid #463529;
+  z-index: 10;
+  pointer-events: none;
+}
+.card-stack-badge.badge-double {
+  background: #EB6A5B;
+  color: #FFFDF9;
+  animation: pulse 2s infinite;
+}
+.card-stack-badge.badge-single {
+  background: #F6C46A;
+  color: #463529;
+}
+
+/* 浮動得分提示文字動畫 (可愛繪本泡泡字) */
+@keyframes floatScore {
+  0% { transform: translate(-50%, 0) scale(0.7); opacity: 0; }
+  20% { transform: translate(-50%, -16px) scale(1.18); opacity: 1; }
+  75% { transform: translate(-50%, -36px) scale(1); opacity: 1; }
+  100% { transform: translate(-50%, -52px) scale(0.9); opacity: 0; }
+}
+
+.animate-float-score {
+  animation: floatScore 1.15s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  pointer-events: none;
+  z-index: 60;
+  text-shadow:
+    -1.5px -1.5px 0 #463529,
+     1.5px -1.5px 0 #463529,
+    -1.5px  1.5px 0 #463529,
+     1.5px  1.5px 0 #463529,
+     0 3px 0 #463529;
+}
+
+/* 桌上器材插畫：いらすとや厚白邊貼紙裁切輪廓 (Die-Cut Sticker Contour) */
+.table-svg-wrapper {
+  filter: 
+    drop-shadow(0 0 2px #FFFDF9)
+    drop-shadow(0 0 3px #FFFDF9)
+    drop-shadow(0 3px 5px rgba(70, 53, 41, 0.28));
+  transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.2s ease;
+}
+
+.table-item-card:hover .table-svg-wrapper,
+.table-item-card.is-hovered .table-svg-wrapper {
+  transform: scale(1.15) rotate(-2deg);
+  filter: 
+    drop-shadow(0 0 2.5px #FFFDF9)
+    drop-shadow(0 0 5px #F6C46A)
+    drop-shadow(0 6px 10px rgba(70, 53, 41, 0.38));
+}
+
+/* 下方器材名稱標籤 (いらすとや手寫風和紙名牌，巧克力棕粗框高對比) */
+.item-name-tag {
+  background: #FFFDF9;
+  color: #463529;
+  border: 2px solid #463529;
+  box-shadow: 0 2px 0 #D5C7B2;
+  font-size: 12px;
+  line-height: 1.25;
+  font-weight: 900;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  border-radius: 0.8rem;
+  transition: all 0.2s ease;
+}
+
+@media (min-width: 640px) {
+  .item-name-tag {
+    font-size: 13.5px;
+    padding: 3px 10px;
+  }
+}
+
+.table-item-card:hover .item-name-tag,
+.table-item-card.is-hovered .item-name-tag {
+  background: #EB6A5B;
+  color: #FFFDF9;
+  border-color: #463529;
+  box-shadow: 0 2px 0 #463529;
+  transform: scale(1.06);
+}
+
+/* 拖曳中的幽靈貼紙 (Dragged Ghost) 醒目白邊貼紙光暈 */
+#dragged-ghost,
+#dragged-ghost-1 {
+  filter: 
+    drop-shadow(0 0 3px #FFFDF9)
+    drop-shadow(0 0 4px #FFFDF9)
+    drop-shadow(0 0 12px rgba(246, 196, 106, 0.95))
+    drop-shadow(0 12px 20px rgba(70, 53, 41, 0.55));
+}
+
+/* 頂部目標題目槽位器材的白邊貼紙輪廓 */
+[data-slot-item-id] svg {
+  filter: drop-shadow(0 0 1.5px #FFFDF9) drop-shadow(0 2px 3px rgba(70, 53, 41, 0.3));
+}
+
+/* 超級雞馬 x いらすとや Q彈物理震盪動畫 */
+@keyframes chickenWobble {
+  0% { transform: scale(1) rotate(0deg); }
+  25% { transform: scale(1.15, 0.85) rotate(-5deg); }
+  50% { transform: scale(0.9, 1.1) rotate(4deg); }
+  75% { transform: scale(1.06, 0.94) rotate(-2deg); }
+  100% { transform: scale(1) rotate(0deg); }
+}
+
+@keyframes bagSwallow {
+  0% { transform: scale(1); }
+  30% { transform: scale(1.35, 0.65); }
+  60% { transform: scale(0.8, 1.2); }
+  85% { transform: scale(1.08, 0.92); }
+  100% { transform: scale(1); }
+}
+
+@keyframes itemRejected {
+  0% { transform: scale(1) rotate(0deg); }
+  20% { transform: translateX(-16px) rotate(-10deg); }
+  40% { transform: translateX(16px) rotate(10deg); }
+  60% { transform: translateX(-10px) rotate(-6deg); }
+  80% { transform: translateX(10px) rotate(6deg); }
+  100% { transform: translateX(0) rotate(0deg); }
+}
+
+@keyframes cardReject {
+  0% { transform: scale(1) translateX(0); }
+  25% { transform: scale(1.01) translateX(-6px); }
+  50% { transform: scale(0.99) translateX(6px); }
+  75% { transform: scale(1.005) translateX(-3px); }
+  100% { transform: scale(1) translateX(0); }
+}
+
+.animate-wobble {
+  animation: chickenWobble 0.45s ease-out;
+}
+
+.animate-swallow {
+  animation: bagSwallow 0.55s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.animate-reject {
+  animation: itemRejected 0.5s ease-in-out;
+}
+
+#ems-bag-target.animate-reject,
+#p1-bag-target.animate-reject,
+#p2-bag-target.animate-reject {
+  animation: cardReject 0.45s ease-in-out;
+}
+
+/* 捏合游標特效 */
+.cursor-pinching {
+  transform: scale(0.82) !important;
+  border-color: #F6C46A !important;
+  background-color: rgba(246, 196, 106, 0.45) !important;
+}
+
+.cursor-pinching > div {
+  transform: scale(1.6);
+  background-color: #EB6A5B !important;
+}
