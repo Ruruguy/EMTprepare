@@ -431,9 +431,9 @@ class GameApp {
     allCards.forEach(c => c.classList.remove('is-hovered'));
 
     // 檢查是否有手懸停在桌上器材上方，提供磁吸預覽高亮反饋
-    hands.forEach((h, idx) => {
+    hands.forEach((h) => {
       if (!h.isPinching) {
-        const requestingPlayer: 'P1' | 'P2' = (!this.isMultiplayerMode || idx === 0) ? 'P1' : 'P2';
+        const requestingPlayer: 'P1' | 'P2' = (!this.isMultiplayerMode || h.id === 0) ? 'P1' : 'P2';
         const closest = this.findClosestShelfCard(h.cursorScreenX, h.cursorScreenY, 110, this.gameMode === 'vs' ? requestingPlayer : undefined);
         if (closest) closest.classList.add('is-hovered');
       }
@@ -441,7 +441,7 @@ class GameApp {
 
     [0, 1].forEach((idx) => {
       const cursorObj = this.cursors[idx];
-      const hand: SingleHandState | undefined = hands[idx];
+      const hand: SingleHandState | undefined = hands.find(h => h.id === idx);
 
       if (hand) {
         cursorObj.container.style.opacity = '1';
@@ -452,6 +452,9 @@ class GameApp {
         const themeBorder = isP1Hand ? 'border-[#3182CE]' : 'border-[#E07A5F]';
         const themeBg = isP1Hand ? 'bg-[#3182CE]/20' : 'bg-[#E07A5F]/20';
 
+        const label = document.getElementById(`cursor-label-${idx}`);
+        const caption = `${isP1Hand ? '1P' : '2P'} · ${hand.isPinching ? '捏合' : '張開'}`;
+        if (label && label.textContent !== caption) label.textContent = caption;
         if (hand.isPinching) {
           cursorObj.ring.className = 'w-10 h-10 rounded-full border-2 border-orange-400 bg-orange-400/40 flex items-center justify-center scale-90 transition-all shadow-lg';
         } else {
@@ -472,6 +475,7 @@ class GameApp {
 
         this.prevPinchStates[idx] = hand.isPinching;
       } else {
+        if (multiState.temporarilyMissing?.includes(idx)) return;
         cursorObj.container.style.opacity = '0';
         if (this.activeGrabs.has(idx)) {
           this.cancelGrab(idx);
@@ -565,6 +569,7 @@ class GameApp {
 
   // 投放判定
   private checkPinchDrop(handId: number | string, x: number, y: number) {
+    if (!this.isRoundActive || this.isPaused) return this.cancelGrab(handId);
     if (this.activeGrabs.has(handId)) {
       this.evaluateDrop(handId, x, y);
     }

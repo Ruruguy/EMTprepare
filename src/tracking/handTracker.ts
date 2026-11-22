@@ -21,6 +21,7 @@ export interface SingleHandState {
 export interface MultiHandGestureState {
   handsCount: number;
   hands: SingleHandState[];
+  temporarilyMissing?: number[];
 }
 
 export class HandTracker {
@@ -35,10 +36,8 @@ export class HandTracker {
   private isMultiplayerMode: boolean = false; // 單人模式下所有偵測到的手全歸屬 P1
 
   // 雙手平滑濾波紀錄
-  private smoothCoords: { [id: number]: { x: number; y: number } } = {
-    0: { x: 0.5, y: 0.5 },
-    1: { x: 0.5, y: 0.5 }
-  };
+  private smoothCoords: { [id: number]: { x: number; y: number } } = {};
+  private lastSeen = new Map<number, number>();
   private pinchStates: { [id: number]: boolean } = {
     0: false,
     1: false
@@ -69,6 +68,7 @@ export class HandTracker {
   }
 
   public setMultiplayerMode(isMulti: boolean) {
+    if (this.isMultiplayerMode !== isMulti) this.resetTracking();
     this.isMultiplayerMode = isMulti;
   }
 
@@ -131,6 +131,7 @@ export class HandTracker {
 
   public stop() {
     this.isRunning = false;
+    this.resetTracking();
     if (this.camera) {
       try {
         this.camera.stop();
@@ -138,7 +139,19 @@ export class HandTracker {
     }
   }
 
+  private resetTracking() {
+    this.lastSeen.clear();
+    this.smoothCoords = {};
+    this.pinchStates = {};
+    this.currentMultiState = { handsCount: 0, hands: [] };
+    this.ctx?.clearRect(0, 0, this.canvasEl.width, this.canvasEl.height);
+    this.onStateChangeCallback?.(this.currentMultiState);
+  }
+
   private onResults(results: any) {
+    if (!this.isRunning) return;
+    const now = performance.now();
+    const aspect = this.videoEl.videoWidth / this.videoEl.videoHeight || 16 / 9;
     if (!this.ctx) return;
     const w = this.canvasEl.width;
     const h = this.canvasEl.height;
@@ -153,8 +166,6 @@ export class HandTracker {
       const detectedRaw = results.multiHandLandmarks.slice(0, 2).map((landmarks: any[], originalIdx: number) => {
         const thumb = landmarks[4];
         const index = landmarks[8];
-        const indexDIP = landmarks[7];
-        const middle = landmarks[12];
         const wrist = landmarks[0];
         const middleKnuckle = landmarks[9];
 
@@ -164,18 +175,10 @@ export class HandTracker {
         const rawX = (mirroredThumbX + mirroredIndexX) / 2;
         const rawY = (thumb.y + index.y) / 2;
 
-        // 手掌尺度參考 (手腕 0 到中指根部 9 距離，一般在 0.12 - 0.20 之間)
-        const palmDist = Math.hypot(wrist.x - middleKnuckle.x, wrist.y - middleKnuckle.y) || 0.15;
-
-        // 純粹且精準的「大拇指尖 (4) 與 食指尖 (8)」指尖距離
-        // 不納入中指或關節干擾，徹底確保手指一張開就能 100% 俐落鬆放！
-        const pinchDist = Math.hypot(thumb.x - index.x, thumb.y - index.y);
-
-        // 動態但嚴謹的自適應門檻：
-        // 捏合觸發門檻約 0.075 ~ 0.092 (兩指尖一碰即吸附抓取)
-        // 鬆放釋放門檻約 0.112 ~ 0.128 (兩指尖微張開約 1.5 公分即刻鬆手，絕不黏手！)
-        const pinchThreshold = Math.max(0.075, Math.min(0.092, palmDist * 0.50));
-        const releaseThreshold = pinchThreshold + 0.036;
+        const palmDist = Math.max(0.001, Math.hypot((wrist.x - middleKnuckle.x) * aspect, wrist.y - middleKnuckle.y));
+        const pinchDist = Math.hypot((thumb.x - index.x) * aspect, thumb.y - index.y);
+        const pinchThreshold = palmDist * 0.42;
+        const releaseThreshold = palmDist * 0.65;
 
         return {
           landmarks,
@@ -188,22 +191,26 @@ export class HandTracker {
         };
       });
 
-      // 排序與分配：
-      // 在雙人模式下：以畫面橫向 X 座標排序（左側玩家固定為 P1 藍色，右側玩家固定為 P2 橘色），徹底解決左右手或換手時 P1/P2 亂跳的問題！
-      // 在單人模式下：不論玩家出左手、右手或雙手同時操作，全數歸屬於 P1 救護員！
-      if (this.isMultiplayerMode && detectedRaw.length > 1) {
-        detectedRaw.sort((a, b) => a.rawX - b.rawX);
-      }
-
+      // 比較兩種配對，讓手勢輸出順序改變時仍沿用上一幀的玩家。
+      const cost = (index: number, id: number) => {
+        const hand = detectedRaw[index];
+        if (!hand) return 0;
+        const previous = this.smoothCoords[id];
+        if (previous) return Math.hypot(hand.rawX - previous.x, hand.rawY - previous.y);
+        const side = this.isMultiplayerMode ? Math.abs(hand.rawX - id) : id;
+        return 0.45 + 0.1 * side;
+      };
+      const swap = cost(0, 1) + cost(1, 0) < cost(0, 0) + cost(1, 1);
       detectedRaw.forEach((hData, handIdx) => {
-        const isP1 = !this.isMultiplayerMode || handIdx === 0;
-        const handId = handIdx; // 0 or 1
+        const handId = swap ? 1 - handIdx : handIdx;
+        this.lastSeen.set(handId, now);
+        const isP1 = !this.isMultiplayerMode || handId === 0;
         const color = isP1 ? '#3182CE' : '#E07A5F';
         const accentColor = isP1 ? '#63B3ED' : '#F6AD55';
 
         let label = isP1 ? 'P1 救護員' : 'P2 救護員';
         if (!this.isMultiplayerMode && detectedRaw.length > 1) {
-          label = handIdx === 0 ? 'P1 救護員' : 'P1 (副手)';
+          label = handId === 0 ? 'P1 救護員' : 'P1 (副手)';
         }
 
         // 靈敏且防誤觸的遲滯捏合狀態切換
@@ -250,7 +257,19 @@ export class HandTracker {
       });
     }
 
+    const temporarilyMissing: number[] = [];
+    for (const [id, timestamp] of this.lastSeen) {
+      if (activeHands.some(hand => hand.id === id)) continue;
+      if (now - timestamp < 180) {
+        temporarilyMissing.push(id);
+      } else {
+        this.lastSeen.delete(id);
+        delete this.smoothCoords[id];
+        delete this.pinchStates[id];
+      }
+    }
     this.currentMultiState = {
+      temporarilyMissing,
       handsCount: activeHands.length,
       hands: activeHands
     };
