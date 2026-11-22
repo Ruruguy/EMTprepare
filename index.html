@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>急救耗材特攻隊：全螢幕體感救護拿取遊戲</title>
+  
+  <!-- Google Fonts: Zen Maru Gothic & Noto Sans TC -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700;900&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Zen Maru Gothic"', '"Noto Sans TC"', 'sans-serif'],
+          },
+          colors: {
+            milktea: '#F2E8DA',
+            milkteaDark: '#D4C4A8',
+            paper: '#F4EFE6',
+            ink: '#2D3748',
+            terracotta: '#E07A5F',
+            matcha: '#68A691',
+            mustard: '#ECC94B'
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- MediaPipe Hands & Camera Utils -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+  <script type="module" src="./assets/index-BEdT86w1.js"></script>
+  <link rel="stylesheet" href="./assets/index-CzO07ziu.css">
+</head>
+<body class="bg-black text-[#2D3748] font-sans select-none overflow-hidden h-screen w-screen relative">
+
+  <!-- ================= 1. 全螢幕視訊攝影鏡頭與手勢骨架畫布 ================= -->
+  <video id="webcam" class="fixed inset-0 w-full h-full object-cover transform -scale-x-100 z-0 bg-stone-900" playsinline muted autoplay></video>
+  
+  <!-- 全視界微暗透光遮罩 -->
+  <div class="fixed inset-0 pointer-events-none z-10 bg-gradient-to-b from-black/45 via-transparent to-black/35"></div>
+  
+  <!-- 手勢骨架與軌跡全螢幕畫布 (P1 藍色 / P2 珊瑚橘) -->
+  <canvas id="camera-overlay" class="fixed inset-0 w-full h-full pointer-events-none z-20"></canvas>
+
+  <!-- 特效粒子畫布 -->
+  <canvas id="particle-canvas" class="fixed inset-0 pointer-events-none z-40"></canvas>
+
+  <!-- ================= 2. 頂部懸浮透明導航 HUD (いらすとや和紙繪本風格) ================= -->
+  <header class="relative z-30 h-16 px-4 md:px-8 bg-[#FFFDF9]/90 backdrop-blur-md border-b-2 border-[#463529] flex items-center justify-between text-[#463529] shadow-md">
+    <!-- 標題與模式標籤 -->
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-2xl bg-[#EB6A5B] border-2 border-[#463529] flex items-center justify-center text-white font-bold text-lg shadow-[0_2px_0_#463529]">
+        🚑
+      </div>
+      <div>
+        <h1 class="text-base md:text-lg font-black tracking-wider flex items-center gap-2 text-[#463529]">
+          急救耗材特攻隊
+          <span id="player-mode-tag" class="text-[10px] md:text-xs font-bold px-2.5 py-0.5 rounded-full bg-[#6BB2E2] text-white border-2 border-[#463529] shadow-[0_1px_0_#463529]">
+            雙人同屏合作 (P1/P2)
+          </span>
+        </h1>
+        <p class="text-[11px] text-[#7A6352] font-bold">いらすとや手繪插畫風・拿取正確得分・收齊獎勵 +20 分</p>
+      </div>
+    </div>
+
+    <!-- 中間數據儀表 (回合、30秒計時、各玩家獨立計分欄) -->
+    <div class="flex items-center gap-2.5 md:gap-4 bg-[#F6EFE2] px-3.5 py-1.5 rounded-2xl border-2 border-[#463529] shadow-[0_2px_0_#463529]">
+      <!-- 回合 -->
+      <div class="text-center">
+        <span class="text-[9px] text-[#7A6352] block leading-none font-black">ROUND</span>
+        <span id="hud-round" class="text-xs md:text-sm font-black text-[#463529]">1/5</span>
+      </div>
+      <div class="w-0.5 h-5 bg-[#D5C7B2]"></div>
+
+      <!-- 30 秒倒數計時器 -->
+      <div class="text-center min-w-[45px]">
+        <span class="text-[9px] text-[#7A6352] block leading-none font-black">TIME</span>
+        <span id="hud-timer" class="text-sm md:text-base font-black text-[#EB6A5B]">30s</span>
+      </div>
+      <div class="w-0.5 h-5 bg-[#D5C7B2]"></div>
+
+      <!-- P1 計分欄 (天藍色) -->
+      <div id="hud-p1-box" class="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-[#D6ECF9] border-2 border-[#463529] shadow-sm">
+        <span class="w-2.5 h-2.5 rounded-full bg-[#4F94C4] border border-[#463529]"></span>
+        <div class="text-left">
+          <span class="text-[9px] text-[#463529] block leading-none font-black">P1 救護員</span>
+          <span id="hud-score-p1" class="text-xs md:text-sm font-black text-[#2B6CB0]">0 分</span>
+        </div>
+      </div>
+
+      <!-- P2 計分欄 (珊瑚橘，切換雙人時顯示) -->
+      <div id="hud-p2-box" class="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-[#FAD4CF] border-2 border-[#463529] shadow-sm transition-all">
+        <span class="w-2.5 h-2.5 rounded-full bg-[#EB6A5B] border border-[#463529]"></span>
+        <div class="text-left">
+          <span class="text-[9px] text-[#463529] block leading-none font-black">P2 救護員</span>
+          <span id="hud-score-p2" class="text-xs md:text-sm font-black text-[#D85344]">0 分</span>
+        </div>
+      </div>
+
+      <!-- 連擊 Combo -->
+      <div class="text-center hidden lg:block">
+        <span class="text-[9px] text-[#7A6352] block leading-none font-black">COMBO</span>
+        <span id="hud-combo" class="text-xs md:text-sm font-black text-[#D97706]">x0</span>
+      </div>
+    </div>
+
+    <!-- 右側功能切換按鈕 -->
+    <div class="flex items-center gap-1 sm:gap-1.5">
+      <!-- 派遣任務前言指引按鈕 -->
+      <button id="btn-intro-guide" class="px-2.5 py-1.5 rounded-xl border-2 border-[#463529] bg-[#FFFDF9] text-xs font-black text-[#463529] hover:bg-[#FDF0C9] transition-all flex items-center gap-1 shadow-[0_2px_0_#463529]" title="查看出勤派遣情境指引">
+        <span>📋</span>
+        <span class="hidden md:inline">派遣簡報</span>
+      </button>
+
+      <!-- 玩家人數切換按鈕 -->
+      <button id="btn-player-mode" class="px-2.5 py-1.5 rounded-xl border-2 border-[#463529] bg-[#FFFDF9] text-xs font-black text-[#463529] hover:bg-[#D6ECF9] transition-all flex items-center gap-1 shadow-[0_2px_0_#463529]">
+        <span>👥</span>
+        <span id="mode-text" class="hidden md:inline">切為單人</span>
+      </button>
+
+      <!-- 暫停 / 繼續按鈕 -->
+      <button id="btn-pause-toggle" class="px-2.5 py-1.5 rounded-xl border-2 border-[#463529] bg-[#F6C46A] text-xs font-black text-[#463529] hover:bg-[#E6AC4C] transition-all flex items-center gap-1 shadow-[0_2px_0_#463529]" title="暫停 / 繼續出勤 (快捷鍵：空白鍵 Space 或 P)">
+        <span id="pause-icon">⏸️</span>
+        <span id="pause-text" class="hidden md:inline">暫停</span>
+      </button>
+
+      <!-- 43款器材圖鑑 -->
+      <button id="btn-encyclopedia" class="px-2.5 py-1.5 rounded-xl border-2 border-[#463529] bg-[#FFFDF9] text-xs font-black text-[#463529] hover:bg-[#FAD4CF] transition-all flex items-center gap-1 shadow-[0_2px_0_#463529]">
+        <span>📖</span>
+        <span class="hidden md:inline">43款耗材</span>
+      </button>
+
+      <!-- 鏡頭切換 -->
+      <button id="btn-camera-toggle" class="px-2.5 py-1.5 rounded-xl border-2 border-[#463529] bg-[#7CB69D] text-xs font-black text-white hover:bg-[#5F9E84] transition-all flex items-center gap-1 shadow-[0_2px_0_#463529]">
+        <span id="cam-icon">📹</span>
+        <span id="cam-text" class="hidden md:inline">鏡頭就緒</span>
+      </button>
+
+      <!-- 輕快挑戰音樂 (BGM) 開關 (預設常開) -->
+      <button id="btn-bgm-toggle" class="px-2.5 py-1.5 rounded-xl border-2 border-[#463529] bg-[#EB6A5B] text-xs font-black text-white hover:bg-[#D85344] transition-all flex items-center gap-1 shadow-[0_2px_0_#463529]" title="背景挑戰音樂開關（預設常開）">
+        <span id="bgm-icon">🎵</span>
+        <span id="bgm-text" class="hidden md:inline">音樂開</span>
+      </button>
+
+      <!-- 音效開關 -->
+      <button id="btn-sound-toggle" class="w-8 h-8 rounded-xl border-2 border-[#463529] bg-[#FFFDF9] text-xs font-black text-[#463529] hover:bg-[#FDF0C9] transition-all flex items-center justify-center shadow-[0_2px_0_#463529]" title="操作音效開關">
+        🔊
+      </button>
+    </div>
+  </header>
+
+  <!-- ================= 3. 主遊戲舞台 ================= -->
+  <main class="relative z-30 flex-1 h-[calc(100vh-4rem)] flex flex-col justify-between pointer-events-none pb-48 sm:pb-52">
+    
+    <!-- 上方區域：整合式出勤題目卡片 暨 急救包投放區 (整張題目卡皆可感應抓取的器材) -->
+    <div class="flex flex-col items-center pt-2 px-3 pointer-events-none">
+      
+      <!-- [模式 A] 單人 (1P) 與 雙人合作 (Co-op) 專用題目卡 (いらすとや和紙布告欄風格) -->
+      <div id="single-arena-container" class="w-full flex justify-center">
+        <div 
+          id="ems-bag-target" 
+          class="pointer-events-auto relative max-w-4xl w-full bg-[#FFFDF9]/92 backdrop-blur-xl border-[3px] border-[#463529] rounded-3xl p-3.5 sm:p-5 shadow-[0_6px_0_#463529,0_15px_30px_rgba(0,0,0,0.35)] flex flex-col md:flex-row items-start md:items-center justify-between gap-3 sm:gap-4 text-[#463529] transition-all duration-200 cursor-pointer group"
+        >
+          <!-- 整張題目卡感應光環 (整張卡片感應到抓取物時發出溫暖光暈) -->
+          <div id="bag-glow" class="absolute -inset-2.5 rounded-3xl bg-gradient-to-r from-[#EB6A5B]/50 via-[#F6C46A]/60 to-[#7CB69D]/50 blur-xl opacity-0 transition-opacity duration-300 pointer-events-none"></div>
+
+          <!-- 左側：傷患情境與主訴描述 -->
+          <div class="relative z-10 flex-1 pr-2">
+            <div class="flex flex-wrap items-center gap-2 mb-1.5">
+              <span id="scenario-urgency" class="text-xs sm:text-sm font-black px-2.5 py-0.5 rounded-full bg-[#EB6A5B] text-white border-2 border-[#463529] shadow-[0_2px_0_#463529]">
+                🚨 危機出勤
+              </span>
+              <span id="scenario-category" class="text-xs sm:text-sm font-black px-2.5 py-0.5 rounded-full bg-[#FDF0C9] text-[#463529] border-2 border-[#463529] shadow-[0_2px_0_#463529]">
+                心血管急症
+              </span>
+              <span id="scenario-patient" class="text-xs sm:text-sm font-black text-[#D85344]">
+                58歲男性・胸骨後劇痛
+              </span>
+              <span class="text-[11px] font-black px-2.5 py-0.5 rounded-full bg-[#7CB69D] text-white border-2 border-[#463529] shadow-[0_1px_0_#463529] hidden sm:inline-flex items-center gap-1">
+                <span>🎒</span>
+                <span>急救包投放處・整張題目卡皆可感應放入</span>
+              </span>
+            </div>
+            <h2 id="scenario-title" class="text-xl sm:text-2xl md:text-3xl font-black tracking-wide text-[#463529] my-0.5">
+              急性胸痛疑似心肌梗塞 (STEMI)
+            </h2>
+            <p id="scenario-desc" class="text-sm sm:text-base md:text-lg text-[#5C4738] font-bold leading-relaxed mt-1">
+              胸骨下壓榨劇痛延伸到左肩！需立即進行心電圖 EKG 與生命徵象評估！
+            </p>
+          </div>
+
+          <!-- 右側：整合式いらすとや微笑急救包吉祥物 + 需求器材槽位 -->
+          <div class="relative z-10 flex items-center gap-3 w-full md:w-auto shrink-0 bg-[#F6EFE2] p-2.5 sm:p-3 rounded-2xl border-2 border-[#463529] shadow-inner">
+            <!-- 嵌入式いらすとや微笑急救包吉祥物 (帶有吞食動畫) -->
+            <div id="bag-icon-container" class="w-14 h-14 sm:w-16 sm:h-16 shrink-0 transition-transform duration-300 transform group-hover:scale-110 drop-shadow-sm">
+              <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" class="w-full h-full">
+                <!-- 提把與側袋耳 -->
+                <path d="M36 28 V18 C36 12 64 12 64 18 V28" stroke="#463529" stroke-width="4" stroke-linecap="round" fill="none"/>
+                <rect x="10" y="44" width="10" height="28" rx="5" fill="#D85344" stroke="#463529" stroke-width="2.5"/>
+                <rect x="80" y="44" width="10" height="28" rx="5" fill="#D85344" stroke="#463529" stroke-width="2.5"/>
+                <!-- 圓滾滾珊瑚紅救護包主體 -->
+                <rect x="17" y="26" width="66" height="60" rx="15" fill="#EB6A5B" stroke="#463529" stroke-width="2.8"/>
+                <ellipse cx="28" cy="33" rx="6" ry="2.2" transform="rotate(-12 28 33)" fill="#FFFFFF" opacity="0.7"/>
+                <!-- 可愛微笑彎彎眼與紅潤臉頰 (いらすとや擬人吉祥物) -->
+                <path d="M34 36 C35 32 39 32 40 36" stroke="#463529" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+                <path d="M60 36 C61 32 65 32 66 36" stroke="#463529" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+                <ellipse cx="30" cy="39" rx="3.5" ry="2" fill="#F8AD9D"/>
+                <ellipse cx="70" cy="39" rx="3.5" ry="2" fill="#F8AD9D"/>
+                <path id="bag-zipper-mouth" d="M46 38 Q50 42 54 38" stroke="#463529" stroke-width="2.4" stroke-linecap="round" fill="none"/>
+                <!-- 暖黃色反光條 -->
+                <rect x="17" y="44" width="66" height="8" fill="#F6C46A" stroke="#463529" stroke-width="2.2"/>
+                <!-- 前袋與生命之星十字 -->
+                <rect x="26" y="56" width="48" height="24" rx="7" fill="#D85344" stroke="#463529" stroke-width="2.4"/>
+                <circle cx="50" cy="68" r="8.5" fill="#FFFDF9" stroke="#463529" stroke-width="2"/>
+                <path d="M50 63 V73 M45 68 H55" stroke="#6BB2E2" stroke-width="3.2" stroke-linecap="round"/>
+              </svg>
+            </div>
+
+            <!-- 插槽區域 -->
+            <div class="flex flex-col items-start gap-1">
+              <div class="flex items-center gap-1.5 text-xs font-black text-[#463529]">
+                <span>所需處置器材</span>
+                <span class="text-[10px] px-2 py-0.5 rounded-full bg-[#EB6A5B] text-white border border-[#463529] font-black animate-pulse">投入處</span>
+              </div>
+              <div id="target-slots" class="flex items-center gap-2">
+                <!-- 動態生成需求插槽 -->
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- [模式 B] 雙人競賽對決模式 (VS Mode Split Arena - いらすとや風格) -->
+      <div id="vs-arena-container" class="pointer-events-auto hidden max-w-5xl w-full flex flex-col gap-2">
+        <!-- 頂部共通題目簡報卡 -->
+        <div class="w-full bg-[#FFFDF9]/92 backdrop-blur-xl border-[2.5px] border-[#463529] rounded-2xl p-2.5 sm:p-3 text-[#463529] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 shadow-[0_4px_0_#463529]">
+          <div class="flex-1 pr-2">
+            <div class="flex flex-wrap items-center gap-1.5 mb-0.5">
+              <span id="vs-scenario-urgency" class="text-[10px] sm:text-xs font-black px-2 py-0.5 rounded-full bg-[#EB6A5B] text-white border border-[#463529]">
+                🚨 危機出勤
+              </span>
+              <span id="vs-scenario-category" class="text-[10px] sm:text-xs font-black px-2 py-0.5 rounded-full bg-[#FDF0C9] text-[#463529] border border-[#463529]">
+                心血管急症
+              </span>
+              <span id="vs-scenario-patient" class="text-[10px] sm:text-xs font-black text-[#D85344]">
+                58歲男性・胸骨後劇痛
+              </span>
+            </div>
+            <h2 id="vs-scenario-title" class="text-base sm:text-lg md:text-xl font-black text-[#463529] truncate">
+              急性胸痛疑似心肌梗塞 (STEMI)
+            </h2>
+            <p id="vs-scenario-desc" class="text-xs sm:text-sm text-[#5C4738] font-bold truncate">
+              胸骨下壓榨劇痛延伸到左肩！需立即進行心電圖 EKG 與生命徵象評估！
+            </p>
+          </div>
+          <!-- 競賽計分規則提示 -->
+          <div class="shrink-0 flex items-center gap-1.5 sm:gap-2 bg-[#F6EFE2] px-2.5 sm:px-3 py-1.5 rounded-xl border-2 border-[#463529] text-[10px] sm:text-[11px] font-black">
+            <span class="text-[#D85344]">⚡ 首位放入 +15分</span>
+            <span class="text-[#D5C7B2]">｜</span>
+            <span class="text-[#463529]">次位 +10分</span>
+            <span class="text-[#D5C7B2]">｜</span>
+            <span class="text-[#5F9E84]">先收齊 +20分</span>
+          </div>
+        </div>
+
+        <!-- 左右分屏獨立微笑急救包 (Left P1 天藍色 / Right P2 珊瑚橘) -->
+        <div class="grid grid-cols-2 gap-2 sm:gap-4 w-full">
+          <!-- 左側半屏：P1 救護員 (天藍和紙特區) -->
+          <div 
+            id="p1-bag-target" 
+            class="relative bg-[#D6ECF9]/90 backdrop-blur-xl border-[2.5px] border-[#463529] rounded-3xl p-2.5 sm:p-4 shadow-[0_5px_0_#463529] flex flex-col sm:flex-row items-center justify-between gap-2 transition-all duration-200 cursor-pointer"
+          >
+            <div id="p1-bag-glow" class="absolute -inset-2 rounded-3xl bg-[#6BB2E2]/50 blur-xl opacity-0 transition-opacity duration-300 pointer-events-none"></div>
+
+            <div class="relative z-10 flex flex-col items-center sm:items-start text-center sm:text-left">
+              <div class="flex items-center gap-1.5">
+                <span class="w-3 h-3 rounded-full bg-[#4F94C4] border border-[#463529]"></span>
+                <span class="text-xs sm:text-sm font-black text-[#463529]">P1 救護包 (左側)</span>
+              </div>
+              <span id="p1-vs-score-tag" class="text-base sm:text-xl font-black text-[#2B6CB0] mt-0.5">0 分</span>
+              <span class="text-[10px] text-[#4F94C4] font-bold hidden md:block">左手捏合拖至此投放</span>
+            </div>
+
+            <div id="p1-bag-icon-container" class="relative z-10 w-12 h-12 sm:w-16 sm:h-16 shrink-0 transition-transform duration-300 drop-shadow-sm">
+              <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" class="w-full h-full">
+                <path d="M36 28 V18 C36 12 64 12 64 18 V28" stroke="#463529" stroke-width="4" stroke-linecap="round" fill="none"/>
+                <rect x="10" y="44" width="10" height="28" rx="5" fill="#4F94C4" stroke="#463529" stroke-width="2.5"/>
+                <rect x="80" y="44" width="10" height="28" rx="5" fill="#4F94C4" stroke="#463529" stroke-width="2.5"/>
+                <rect x="17" y="26" width="66" height="60" rx="15" fill="#6BB2E2" stroke="#463529" stroke-width="2.8"/>
+                <ellipse cx="28" cy="33" rx="6" ry="2.2" transform="rotate(-12 28 33)" fill="#FFFFFF" opacity="0.7"/>
+                <path d="M34 36 C35 32 39 32 40 36" stroke="#463529" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+                <path d="M60 36 C61 32 65 32 66 36" stroke="#463529" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+                <ellipse cx="30" cy="39" rx="3.5" ry="2" fill="#F8AD9D"/>
+                <ellipse cx="70" cy="39" rx="3.5" ry="2" fill="#F8AD9D"/>
+                <path d="M46 38 Q50 42 54 38" stroke="#463529" stroke-width="2.4" stroke-linecap="round" fill="none"/>
+                <rect x="17" y="44" width="66" height="8" fill="#F6C46A" stroke="#463529" stroke-width="2.2"/>
+                <rect x="26" y="56" width="48" height="24" rx="7" fill="#4F94C4" stroke="#463529" stroke-width="2.4"/>
+                <circle cx="50" cy="68" r="8.5" fill="#FFFDF9" stroke="#463529" stroke-width="2"/>
+                <path d="M50 63 V73 M45 68 H55" stroke="#4F94C4" stroke-width="3.2" stroke-linecap="round"/>
+              </svg>
+            </div>
+
+            <div class="relative z-10 flex flex-col items-center sm:items-end gap-1">
+              <span class="text-[10px] font-black text-[#463529]">P1 收集進度</span>
+              <div id="p1-target-slots" class="flex items-center gap-1.5">
+                <!-- 動態生成 P1 插槽 -->
+              </div>
+            </div>
+          </div>
+
+          <!-- 右側半屏：P2 救護員 (珊瑚粉橘和紙特區) -->
+          <div 
+            id="p2-bag-target" 
+            class="relative bg-[#FAD4CF]/90 backdrop-blur-xl border-[2.5px] border-[#463529] rounded-3xl p-2.5 sm:p-4 shadow-[0_5px_0_#463529] flex flex-col sm:flex-row items-center justify-between gap-2 transition-all duration-200 cursor-pointer"
+          >
+            <div id="p2-bag-glow" class="absolute -inset-2 rounded-3xl bg-[#EB6A5B]/50 blur-xl opacity-0 transition-opacity duration-300 pointer-events-none"></div>
+
+            <div class="relative z-10 flex flex-col items-center sm:items-start text-center sm:text-left">
+              <div class="flex items-center gap-1.5">
+                <span class="w-3 h-3 rounded-full bg-[#EB6A5B] border border-[#463529]"></span>
+                <span class="text-xs sm:text-sm font-black text-[#463529]">P2 救護包 (右側)</span>
+              </div>
+              <span id="p2-vs-score-tag" class="text-base sm:text-xl font-black text-[#D85344] mt-0.5">0 分</span>
+              <span class="text-[10px] text-[#D85344] font-bold hidden md:block">右手捏合拖至此投放</span>
+            </div>
+
+            <div id="p2-bag-icon-container" class="relative z-10 w-12 h-12 sm:w-16 sm:h-16 shrink-0 transition-transform duration-300 drop-shadow-sm">
+              <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" class="w-full h-full">
+                <path d="M36 28 V18 C36 12 64 12 64 18 V28" stroke="#463529" stroke-width="4" stroke-linecap="round" fill="none"/>
+                <rect x="10" y="44" width="10" height="28" rx="5" fill="#D85344" stroke="#463529" stroke-width="2.5"/>
+                <rect x="80" y="44" width="10" height="28" rx="5" fill="#D85344" stroke="#463529" stroke-width="2.5"/>
+                <rect x="17" y="26" width="66" height="60" rx="15" fill="#EB6A5B" stroke="#463529" stroke-width="2.8"/>
+                <ellipse cx="28" cy="33" rx="6" ry="2.2" transform="rotate(-12 28 33)" fill="#FFFFFF" opacity="0.7"/>
+                <path d="M34 36 C35 32 39 32 40 36" stroke="#463529" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+                <path d="M60 36 C61 32 65 32 66 36" stroke="#463529" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+                <ellipse cx="30" cy="39" rx="3.5" ry="2" fill="#FDF0C9"/>
+                <ellipse cx="70" cy="39" rx="3.5" ry="2" fill="#FDF0C9"/>
+                <path d="M46 38 Q50 42 54 38" stroke="#463529" stroke-width="2.4" stroke-linecap="round" fill="none"/>
+                <rect x="17" y="44" width="66" height="8" fill="#F6C46A" stroke="#463529" stroke-width="2.2"/>
+                <rect x="26" y="56" width="48" height="24" rx="7" fill="#D85344" stroke="#463529" stroke-width="2.4"/>
+                <circle cx="50" cy="68" r="8.5" fill="#FFFDF9" stroke="#463529" stroke-width="2"/>
+                <path d="M50 63 V73 M45 68 H55" stroke="#EB6A5B" stroke-width="3.2" stroke-linecap="round"/>
+              </svg>
+            </div>
+
+            <div class="relative z-10 flex flex-col items-center sm:items-end gap-1">
+              <span class="text-[10px] font-black text-[#463529]">P2 收集進度</span>
+              <div id="p2-target-slots" class="flex items-center gap-1.5">
+                <!-- 動態生成 P2 插槽 -->
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 中間留白：全視界鏡頭穿透區域，方便玩家手勢揮動與觀察 -->
+
+  </main>
+
+  <!-- ================= 4. 畫面下方：透明透視器材備品桌 (いらすとや木紋紙膠帶飾邊 + 鏡頭穿透桌面) ================= -->
+  <footer class="fixed bottom-0 left-0 right-0 z-30 h-48 sm:h-52 bg-gradient-to-b from-[#463529]/35 via-[#463529]/25 to-[#2D221B]/45 backdrop-blur-md border-t-[3px] border-[#463529] shadow-[0_-10px_35px_rgba(0,0,0,0.45)] flex flex-col justify-between px-3 sm:px-6 py-2 select-none">
+    
+    <!-- 桌子頂部飾條與指引文字 (和紙標籤質感) -->
+    <div class="flex items-center justify-between px-2 pb-1 border-b border-white/25">
+      <div class="flex items-center gap-2">
+        <span class="text-xs sm:text-sm font-black text-[#463529] bg-[#F6C46A] px-2.5 py-0.5 rounded-full border-2 border-[#463529] shadow-[0_1.5px_0_#463529] tracking-wide flex items-center gap-1.5">
+          <span>🎨</span>
+          <span>いらすとや救護器材桌</span>
+        </span>
+        <span class="text-[11px] text-[#FFFDF9] font-bold hidden sm:inline drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)]">
+          ・手指捏合或滑鼠拖曳桌面耗材貼紙至上方微笑急救包
+        </span>
+      </div>
+      <div class="text-[11px] font-black text-[#463529] bg-[#FFFDF9] px-2.5 py-0.5 rounded-full border-2 border-[#463529] shadow-[0_1.5px_0_#463529]">
+        正確拿取得分 ｜ 完整收齊 +20 分
+      </div>
+    </div>
+
+    <!-- 桌面上擺放的器材 (いらすとや手繪貼紙、下方有名稱標籤) -->
+    <div 
+      id="equipment-shelf" 
+      class="flex-1 grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-2 sm:gap-3 items-center justify-items-center py-1 overflow-x-auto overflow-y-hidden"
+    >
+      <!-- 動態載入桌上器材 -->
+    </div>
+  </footer>
+
+  <!-- ================= 5. 浮動虛擬手勢游標 (支援雙人 P1 / P2) ================= -->
+  <!-- P1 游標 (藍色) -->
+  <div id="gesture-cursor-0" class="fixed pointer-events-none z-50 transform -translate-x-1/2 -translate-y-1/2 transition-transform duration-75 flex items-center justify-center">
+    <div id="cursor-ring-0" class="w-12 h-12 rounded-full border-2 border-[#3182CE] bg-[#3182CE]/20 flex items-center justify-center shadow-lg transition-all">
+      <div class="w-3 h-3 rounded-full bg-[#3182CE]"></div>
+    </div>
+    <span id="cursor-label-0" class="absolute -top-6 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-[#3182CE] text-white shadow-md">
+      P1
+    </span>
+  </div>
+
+  <!-- P2 游標 (珊瑚橘) -->
+  <div id="gesture-cursor-1" class="fixed pointer-events-none z-50 transform -translate-x-1/2 -translate-y-1/2 transition-transform duration-75 flex items-center justify-center opacity-0">
+    <div id="cursor-ring-1" class="w-12 h-12 rounded-full border-2 border-[#E07A5F] bg-[#E07A5F]/20 flex items-center justify-center shadow-lg transition-all">
+      <div class="w-3 h-3 rounded-full bg-[#E07A5F]"></div>
+    </div>
+    <span id="cursor-label-1" class="absolute -top-6 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-[#E07A5F] text-white shadow-md">
+      P2
+    </span>
+  </div>
+
+  <!-- 拖曳中物件浮動層 (Dragged Item Ghosts: P1 / Mouse 及 P2 獨立拖曳) -->
+  <div id="dragged-ghost" class="fixed pointer-events-none z-50 w-24 h-24 hidden transform -translate-x-1/2 -translate-y-1/2 drop-shadow-[0_12px_24px_rgba(0,0,0,0.5)]">
+    <div id="ghost-content" class="w-full h-full p-1.5 filter drop-shadow"></div>
+  </div>
+  <div id="dragged-ghost-1" class="fixed pointer-events-none z-50 w-24 h-24 hidden transform -translate-x-1/2 -translate-y-1/2 drop-shadow-[0_12px_24px_rgba(0,0,0,0.5)]">
+    <div id="ghost-content-1" class="w-full h-full p-1.5 filter drop-shadow"></div>
+  </div>
+
+  <!-- 回合過關 / 結算彈窗 Modal (超級雞馬風格計分卡) -->
+  <div id="round-modal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md hidden opacity-0 transition-opacity duration-300">
+    <div class="w-full max-w-lg bg-[#FAF8F5] border-2 border-[#383531] rounded-3xl shadow-2xl p-6 text-center font-sans">
+      <div id="modal-banner" class="w-16 h-16 rounded-full mx-auto mb-3 flex items-center justify-center text-3xl border-2 border-[#383531] bg-[#48BB78] text-white shadow-lg">
+        🎉
+      </div>
+      <h2 id="modal-title" class="text-2xl font-black text-[#2D3748]">出勤處置成功！</h2>
+      <p id="modal-subtitle" class="text-xs text-[#718096] mt-1">救護人員反應迅速，病患生命徵象維持穩定！</p>
+
+      <!-- 得分分解卡 (含 P1/P2 各自得分與 +20 完整獎勵) -->
+      <div class="my-4 p-4 bg-[#F4EFE6] rounded-2xl border border-[#383531]/30 flex flex-col gap-2 text-xs">
+        <div id="modal-scores-breakdown" class="flex flex-col gap-1.5">
+          <!-- 動態注入各玩家得分 -->
+        </div>
+        <div class="flex justify-between font-bold text-[#38A169]">
+          <span>收齊完整獎勵 (Completion Bonus)：</span>
+          <span id="modal-score-bonus">+20 分</span>
+        </div>
+        <div class="w-full h-px bg-[#383531]/20 my-1"></div>
+        <div class="flex justify-between text-sm font-black text-[#2D3748]">
+          <span>本輪累計總分：</span>
+          <span id="modal-score-total" class="text-lg text-[#C53030]">0 分</span>
+        </div>
+      </div>
+
+      <!-- EMT 專業處置教學小百科卡片 -->
+      <div class="text-left p-3.5 bg-white rounded-2xl border border-[#383531]/30 mb-5 text-xs text-[#4A5568] leading-relaxed">
+        <div class="font-bold text-[#2D3748] mb-1 flex items-center gap-1.5">
+          <span>🩺</span>
+          <span>救護技術員處置重點：</span>
+        </div>
+        <p id="modal-rationale">...</p>
+        <p id="modal-tip" class="mt-1.5 text-[#DD6B20] font-semibold">...</p>
+      </div>
+
+      <!-- 下一關按鈕 -->
+      <button id="modal-next-btn" class="w-full py-3 bg-[#E07A5F] hover:bg-[#D46B50] text-white font-bold rounded-2xl border-2 border-[#383531] shadow-md transition-all active:scale-95 text-sm tracking-wide">
+        下一趟緊急出勤 ➔
+      </button>
+    </div>
+  </div>
+
+  <!-- ================= 6. 遊戲前言指引畫面：救護出勤派遣令 (Dispatch Briefing Modal) ================= -->
+  <div id="dispatch-intro-modal" class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/80 backdrop-blur-xl transition-all duration-500 font-sans">
+    <div class="relative w-full max-w-2xl bg-[#FAF8F5] border-2 border-[#CBB08C] rounded-[2.25rem] shadow-[0_25px_60px_rgba(0,0,0,0.5)] p-5 sm:p-8 text-center flex flex-col justify-between max-h-[95vh] overflow-y-auto">
+      
+      <!-- 右上角關閉按鈕 -->
+      <button id="btn-close-intro" class="absolute top-4 right-4 w-9 h-9 rounded-full bg-white/80 hover:bg-[#E07A5F] hover:text-white border border-[#CBB08C] text-[#2D3748] font-bold text-lg flex items-center justify-center transition-colors shadow-sm cursor-pointer z-10" title="關閉派遣簡報">
+        ✕
+      </button>
+
+      <!-- 頂部派遣徽章 -->
+      <div class="flex flex-col items-center gap-1.5 mb-2">
+        <div class="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-[#E07A5F] text-white text-[11px] sm:text-xs font-black tracking-widest shadow-md">
+          <span class="animate-pulse">🚨</span>
+          <span>119 救災救護指揮中心・緊急出勤派遣令</span>
+        </div>
+        <h1 class="text-xl sm:text-2xl md:text-3xl font-black text-[#2D3748] tracking-tight mt-1">
+          急救耗材特攻隊：隨機救護挑戰
+        </h1>
+        <p class="text-xs sm:text-sm text-[#718096] font-medium">
+          每一趟鳴笛出勤，都是守護生命的未知挑戰・手眼協調即刻出動！
+        </p>
+      </div>
+
+      <!-- 救護情境宣告廣播卡 (Dispatch Lore Declaration) -->
+      <div class="my-3 text-left p-4 sm:p-5 bg-[#F4EFE6] rounded-2xl border-l-4 border-[#E07A5F] border-t border-r border-b border-[#D4C4A8]/60 shadow-inner">
+        <div class="flex items-center gap-2 font-black text-sm text-[#2D3748] mb-1.5">
+          <span>📻</span>
+          <span>指揮中心情境宣告廣播：</span>
+        </div>
+        <p class="text-xs sm:text-[13px] text-[#4A5568] leading-relaxed">
+          「各救護分隊請注意！城市各角落正發生未知急難——從 <strong class="text-[#C53030]">心肺驟停 OHCA</strong>、<strong class="text-[#C53030]">大動脈噴血創傷</strong>，到 <strong class="text-[#D69E2E]">低血糖昏迷</strong>、<strong class="text-[#319795]">高傳染性呼吸道疫病</strong>。
+          <strong>每一趟救護出勤都有截然不同的隨機主訴與挑戰！</strong>
+          請救護技術員在分秒必爭的黃金時間內，冷靜辨識傷病徵象，將正確的救護耗材放入急救包！」
+        </p>
+      </div>
+
+      <!-- 三大核心指引小卡 (3 Core Guides) -->
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5 my-2 text-left">
+        <!-- 卡 1: 隔空手勢 -->
+        <div class="p-3 bg-white/80 rounded-2xl border border-[#D4C4A8]/70 shadow-sm flex flex-col justify-between">
+          <div class="flex items-center gap-1.5 font-black text-xs text-[#2D3748] mb-1">
+            <span class="text-base">🖐️</span>
+            <span>隔空捏合抓取</span>
+          </div>
+          <p class="text-[11px] text-[#718096] leading-snug">
+            鏡頭前大拇指與食指「捏合」即可抓起桌面耗材，往上拖入急救包！（亦支援滑鼠拖曳）
+          </p>
+        </div>
+
+        <!-- 卡 2: 單雙人同屏 -->
+        <div class="p-3 bg-white/80 rounded-2xl border border-[#D4C4A8]/70 shadow-sm flex flex-col justify-between">
+          <div class="flex items-center gap-1.5 font-black text-xs text-[#2D3748] mb-1">
+            <span class="text-base">👥</span>
+            <span>單人 / 雙人同屏</span>
+          </div>
+          <p class="text-[11px] text-[#718096] leading-snug">
+            支援單人自主訓練，或隨時切換雙人（P1 藍色 / P2 橘色）即時同屏協作或競速得分！
+          </p>
+        </div>
+
+        <!-- 卡 3: 30秒計時與計分 -->
+        <div class="p-3 bg-white/80 rounded-2xl border border-[#D4C4A8]/70 shadow-sm flex flex-col justify-between">
+          <div class="flex items-center gap-1.5 font-black text-xs text-[#2D3748] mb-1">
+            <span class="text-base">⏱️</span>
+            <span>30秒＋20分獎勵</span>
+          </div>
+          <p class="text-[11px] text-[#718096] leading-snug">
+            每回合 30 秒倒數，答對一項 +10 分；整套完整收齊再獲 <strong class="text-[#E07A5F]">+20 分</strong> 完備大獎！
+          </p>
+        </div>
+      </div>
+
+      <!-- 選擇遊玩模式 (Game Mode Selection: 1P 單人 / 2P 合作 / 2P 競速對決) -->
+      <div class="my-2 p-3.5 bg-white/90 rounded-2xl border border-[#D4C4A8] shadow-sm flex flex-col items-center gap-2">
+        <div class="flex items-center gap-2 text-xs font-bold text-[#2D3748]">
+          <span>🎮</span>
+          <span>選擇遊戲模式：</span>
+        </div>
+        <div id="game-mode-selector" class="flex flex-wrap items-center justify-center gap-2">
+          <button data-mode="1p" class="mode-select-btn px-3 py-1.5 rounded-xl text-xs font-bold border border-[#D4C4A8] bg-[#F4EFE6] text-[#5C4D3C] hover:bg-[#48BB78] hover:text-white transition-all shadow-sm cursor-pointer">
+            🧑 單人出勤 (1P)
+          </button>
+          <button data-mode="coop" class="mode-select-btn px-3.5 py-1.5 rounded-xl text-xs font-bold border border-[#D4C4A8] bg-[#F4EFE6] text-[#5C4D3C] hover:bg-[#3182CE] hover:text-white transition-all shadow-sm cursor-pointer">
+            👥 雙人同屏合作 (Co-op)
+          </button>
+          <button data-mode="vs" class="mode-select-btn px-4 py-1.5 rounded-xl text-xs font-black border-2 border-white bg-[#E07A5F] text-white shadow-md transition-all scale-105 active-mode-btn cursor-pointer">
+            ⚔️ 雙人競速對決 (VS 左右視窗・搶先15分/次拿10分)
+          </button>
+        </div>
+      </div>
+
+      <!-- 選擇出勤競賽題數 (Match Length Selection) -->
+      <div class="my-2.5 p-3.5 bg-white/90 rounded-2xl border border-[#D4C4A8] shadow-sm flex flex-col items-center gap-2">
+        <div class="flex items-center gap-2 text-xs font-bold text-[#2D3748]">
+          <span>🎯</span>
+          <span>選擇本場出勤題數（共 30 款隨機情境題庫）：</span>
+        </div>
+        <div id="round-count-selector" class="flex flex-wrap items-center justify-center gap-2">
+          <button data-rounds="3" class="round-select-btn px-3 py-1.5 rounded-xl text-xs font-bold border border-[#D4C4A8] bg-[#F4EFE6] text-[#5C4D3C] hover:bg-[#E07A5F] hover:text-white transition-all shadow-sm">
+            ⚡ 3 題 (速戰)
+          </button>
+          <button data-rounds="5" class="round-select-btn px-3.5 py-1.5 rounded-xl text-xs font-black border-2 border-white bg-[#E07A5F] text-white shadow-md transition-all scale-105 active-round-btn">
+            🎯 5 題 (標準)
+          </button>
+          <button data-rounds="10" class="round-select-btn px-3 py-1.5 rounded-xl text-xs font-bold border border-[#D4C4A8] bg-[#F4EFE6] text-[#5C4D3C] hover:bg-[#E07A5F] hover:text-white transition-all shadow-sm">
+            🔥 10 題 (爭奪MVP)
+          </button>
+          <button data-rounds="15" class="round-select-btn px-3 py-1.5 rounded-xl text-xs font-bold border border-[#D4C4A8] bg-[#F4EFE6] text-[#5C4D3C] hover:bg-[#E07A5F] hover:text-white transition-all shadow-sm">
+            🏆 15 題 (菁英賽)
+          </button>
+          <button data-rounds="30" class="round-select-btn px-3 py-1.5 rounded-xl text-xs font-bold border border-[#D4C4A8] bg-[#F4EFE6] text-[#5C4D3C] hover:bg-[#E07A5F] hover:text-white transition-all shadow-sm">
+            🌟 30 題 (大滿貫)
+          </button>
+        </div>
+      </div>
+
+      <!-- 中央 START 按鍵 (Prominent START Button in the Center) -->
+      <div class="my-3 sm:my-4 flex flex-col items-center justify-center">
+        <button 
+          id="btn-start-game" 
+          class="relative w-full sm:w-auto px-12 py-4 bg-gradient-to-r from-[#E07A5F] via-[#E28743] to-[#D97706] hover:from-[#D46B50] hover:to-[#B45309] text-white font-black text-xl sm:text-2xl rounded-2xl sm:rounded-3xl shadow-[0_12px_28px_rgba(224,122,95,0.45)] hover:shadow-[0_16px_36px_rgba(224,122,95,0.6)] border-2 border-white/80 transform hover:-translate-y-1 active:translate-y-0.5 active:scale-95 transition-all flex items-center justify-center gap-3.5 group cursor-pointer"
+        >
+          <span class="text-2xl sm:text-3xl animate-bounce">🚑</span>
+          <span class="tracking-wide">START 立即出勤</span>
+          <span class="text-lg sm:text-xl transform group-hover:translate-x-2 transition-transform">➔</span>
+        </button>
+        <span class="text-[11px] text-[#8C7A65] mt-2 font-semibold flex items-center gap-1">
+          <span>🎵</span>
+          <span>點擊開始後將自動啟動輕快挑戰背景音樂（預設常開，右上角可隨時開關）</span>
+        </span>
+      </div>
+
+      <!-- 底部額外說明與圖鑑按鈕 -->
+      <div class="pt-2 border-t border-[#D4C4A8]/50 flex flex-wrap items-center justify-between text-[11px] text-[#718096]">
+        <span>收錄 30 種隨機出勤情境 ✕ 43 款日式手繪救護耗材</span>
+        <button id="btn-intro-encyclopedia" class="underline hover:text-[#E07A5F] font-bold">
+          先行查閱 43 款器材圖鑑 📖
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 7. 最終總結算頒獎盛典：冠軍頒獎典禮 (Championship Podium Modal) ================= -->
+  <div id="podium-modal" class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/85 backdrop-blur-2xl hidden opacity-0 transition-opacity duration-500 font-sans">
+    <div class="relative w-full max-w-xl bg-gradient-to-b from-[#FAF8F5] via-[#FFFDF9] to-[#F4EFE6] border-2 border-[#CBB08C] rounded-[2.5rem] shadow-[0_25px_60px_rgba(0,0,0,0.6)] p-6 sm:p-8 text-center flex flex-col items-center overflow-hidden">
+      
+      <!-- 頂部冠軍皇冠 & 獎盃動畫 -->
+      <div class="relative mb-2">
+        <div class="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-gradient-to-tr from-amber-400 via-yellow-300 to-amber-200 border-4 border-white shadow-xl flex items-center justify-center text-4xl sm:text-5xl mx-auto animate-bounce">
+          🏆
+        </div>
+        <div class="absolute -top-3 left-1/2 -translate-x-1/2 text-2xl animate-pulse">
+          👑
+        </div>
+      </div>
+
+      <!-- 榮譽標題 -->
+      <div class="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-amber-500/20 text-[#B45309] text-xs font-black tracking-widest border border-amber-400/40 mb-2">
+        <span>🎖️</span>
+        <span>救災救護出勤・大會結算頒獎典禮</span>
+      </div>
+
+      <h2 id="podium-title" class="text-2xl sm:text-3xl font-black text-[#2D3748] tracking-tight">
+        恭喜 P1 救護員榮獲冠軍 MVP！
+      </h2>
+      <p id="podium-subtitle" class="text-xs sm:text-sm text-[#718096] mt-1 font-medium">
+        完成所有救護任務，分秒必爭守護市民生命安全！
+      </p>
+
+      <!-- 頒獎台 (Podium Stand) - 支援雙人冠亞軍高低台與單人榮譽榜 -->
+      <div id="podium-stage" class="w-full my-5 p-4 bg-white/80 rounded-3xl border border-[#D4C4A8]/60 shadow-inner flex items-end justify-center gap-3">
+        <!-- 動態注入冠亞軍頒獎台 -->
+      </div>
+
+      <!-- 本場數據總覽 -->
+      <div id="podium-stats" class="w-full grid grid-cols-3 gap-2 p-3 bg-[#FAF5EE] rounded-2xl border border-[#D4C4A8]/60 text-center mb-5 text-xs">
+        <!-- 動態注入局數、耗材收齊數、總分 -->
+      </div>
+
+      <!-- 操作按鈕 -->
+      <div class="flex flex-col sm:flex-row items-center gap-3 w-full">
+        <button id="podium-restart-btn" class="flex-1 w-full py-3.5 bg-gradient-to-r from-[#E07A5F] to-[#D97706] hover:from-[#D46B50] hover:to-[#B45309] text-white font-black rounded-2xl border-2 border-white/80 shadow-lg active:scale-95 transition-all text-sm tracking-wide flex items-center justify-center gap-2 cursor-pointer">
+          <span>🔄</span>
+          <span>再次出勤挑戰（全新隨機題目）</span>
+        </button>
+        <button id="podium-encyclopedia-btn" class="w-full sm:w-auto px-5 py-3.5 bg-white hover:bg-stone-100 text-[#4A5568] font-bold rounded-2xl border border-[#383531]/30 shadow-sm transition-all text-xs cursor-pointer">
+          📖 查看43款耗材圖鑑
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 8. 遊戲暫停與繼續彈窗 (Pause & Resume Modal) ================= -->
+  <div id="pause-modal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xl hidden opacity-0 transition-opacity duration-300 font-sans">
+    <div class="relative w-full max-w-lg bg-[#FAF8F5] border-2 border-[#CBB08C] rounded-[2.25rem] shadow-[0_25px_60px_rgba(0,0,0,0.6)] p-6 sm:p-8 text-center flex flex-col items-center">
+      
+      <!-- 頂部暫停圖標 -->
+      <div class="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-amber-500/20 border-2 border-amber-500 text-amber-600 flex items-center justify-center text-3xl sm:text-4xl shadow-inner mb-3 animate-pulse">
+        ⏸️
+      </div>
+
+      <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-black tracking-widest border border-amber-300 mb-2">
+        <span>⏱️</span>
+        <span>出勤時間已凍結</span>
+      </div>
+
+      <h2 class="text-2xl sm:text-3xl font-black text-[#2D3748] tracking-tight">
+        救護任務已暫停
+      </h2>
+      <p id="pause-modal-subtitle" class="text-xs sm:text-sm text-[#718096] mt-1 font-medium">
+        目前為第 1 趟出勤・倒數時間尚餘 30 秒
+      </p>
+
+      <!-- 當前題目精簡預覽卡 -->
+      <div class="w-full my-4 p-3.5 bg-[#F4EFE6] rounded-2xl border border-[#D4C4A8]/60 text-left">
+        <div class="flex items-center justify-between text-xs font-bold text-[#718096] mb-1">
+          <span class="flex items-center gap-1">
+            <span>🚑</span>
+            <span id="pause-current-scenario-cat">心血管急症</span>
+          </span>
+          <span id="pause-current-time-badge" class="px-2 py-0.5 rounded-full bg-amber-500 text-white font-black text-[11px]">
+            剩餘 30 秒
+          </span>
+        </div>
+        <div id="pause-current-scenario-title" class="text-base sm:text-lg font-black text-[#2D3748]">
+          急性胸痛疑似心肌梗塞 (STEMI)
+        </div>
+        <div id="pause-current-scenario-patient" class="text-xs text-[#8C7A65] font-semibold mt-0.5">
+          58歲男性・胸骨後劇痛冒冷汗
+        </div>
+      </div>
+
+      <!-- 中央顯眼「繼續出勤」按鈕 -->
+      <button 
+        id="btn-modal-resume" 
+        class="w-full py-4 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-500 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-lg sm:text-xl rounded-2xl border-2 border-white/80 shadow-lg hover:shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2.5 cursor-pointer group mb-3"
+      >
+        <span class="text-2xl animate-bounce">▶️</span>
+        <span class="tracking-wide">繼續出勤任務</span>
+        <span class="text-xs font-medium px-2 py-0.5 rounded-full bg-white/20 text-white hidden sm:inline">Space / P</span>
+      </button>
+
+      <!-- 次要操作按鈕組 -->
+      <div class="grid grid-cols-2 gap-2.5 w-full text-xs">
+        <button id="btn-pause-restart-round" class="py-2.5 px-3 bg-white hover:bg-stone-100 text-[#4A5568] font-bold rounded-xl border border-[#383531]/30 shadow-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer">
+          <span>🔄</span>
+          <span>重啟本題出勤</span>
+        </button>
+        <button id="btn-pause-open-encyclopedia" class="py-2.5 px-3 bg-white hover:bg-stone-100 text-[#4A5568] font-bold rounded-xl border border-[#383531]/30 shadow-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer">
+          <span>📖</span>
+          <span>查閱器材圖鑑</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // 支援直接點擊本地 index.html 或 dist/index.html (file:// 協定) 執行，免啟動伺服器即可完整遊玩
+    if (window.location.protocol === 'file:') {
+      var localBundle = document.createElement('script');
+      localBundle.src = './dist/app.bundle.js';
+      localBundle.onerror = function() {
+        var altBundle = document.createElement('script');
+        altBundle.src = './app.bundle.js';
+        document.body.appendChild(altBundle);
+      };
+      document.body.appendChild(localBundle);
+    }
+  </script>
+</body>
+</html>
